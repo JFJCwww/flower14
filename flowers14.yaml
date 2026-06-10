@@ -1,0 +1,22 @@
+# Flowers14 YOLOv8 分类数据集配置
+path: D:/shixun/flowers14_data
+train: train
+val: val
+
+names:
+  0: astilbe          # 落新妇
+  1: bellflower       # 风铃草
+  2: black_eyed_susan # 黑眼菊
+  3: calendula        # 金盏花
+  4: california_poppy # 金英花
+  5: carnation        # 康乃馨
+  6: common_daisy     # 雏菊
+  7: coreopsis        # 金鸡菊
+  8: dandelion        # 蒲公英
+  9: iris             # 鸢尾花
+  10: rose            # 玫瑰
+  11: sunflower       # 向日葵
+  12: tulip           # 郁金香
+  13: water_lily      # 睡莲
+
+nc: 14

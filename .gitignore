@@ -1,0 +1,33 @@
+# 排除数据集和水果分拣项目
+dataset/
+fruit_pick/
+
+# 排除训练产出
+runs/
+
+# 排除大型数据集源文件
+flowers14/
+flowers14_data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# 模型权重文件（过大）
+*.pt
+*.onnx
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.cache
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# 结果图片
+result.jpg
