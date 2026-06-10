@@ -25,7 +25,8 @@
 
 ```
 shixun/
-├── train_yolo.py          # 训练脚本
+├── train_yolo.py          # 小型训练脚本（yolov8n-cls, 224px）
+├── train_yolo_opt.py      # 大型训练脚本（yolov8s-cls, 384px, 更强增强）
 ├── predict.py             # 命令行推理脚本
 ├── work.py                # PyQt5 可视化识别界面
 ├── prepare_data.py        # 数据集准备脚本
@@ -41,10 +42,14 @@ shixun/
 │       └── ...
 └── runs/
     └── classify/
-        └── flowers14_cls-5/
+        ├── flowers14_cls/
+        │   └── weights/
+        │       ├── best.pt    # 小型训练最佳模型
+        │       └── last.pt
+        └── flowers14_cls_v2/
             └── weights/
-                ├── best.pt    # 最佳模型
-                └── last.pt    # 最后一轮模型
+                ├── best.pt    # 大型训练最佳模型
+                └── last.pt
 ```
 
 ## 环境依赖
@@ -76,15 +81,17 @@ python prepare_data.py
 
 ### 2. 训练模型
 
+提供两种训练脚本，根据需求选择：
+
+#### 小型训练（快速验证）
+
 ```bash
 python train_yolo.py
 ```
 
-训练参数：
-
 | 参数 | 值 | 说明 |
 |------|------|------|
-| 模型 | yolov8n-cls.pt | YOLOv8-nano 分类模型 |
+| 模型 | yolov8n-cls.pt | YOLOv8-nano 分类模型（约 3M 参数） |
 | epochs | 50 | 最大训练轮数 |
 | imgsz | 224 | 输入图片尺寸 |
 | batch | 32 | 批次大小 |
@@ -93,11 +100,24 @@ python train_yolo.py
 | lr0 | 0.001 | 初始学习率 |
 | cos_lr | True | 余弦学习率衰减 |
 
-训练结果：
+训练结果：Top-1 准确率 **96.9%**，Top-5 准确率 **100%**，实际训练 12 轮。
 
-- Top-1 准确率：**96.9%**
-- Top-5 准确率：**100%**
-- 实际训练 12 轮（早停触发，最佳在第 2 轮）
+#### 大型训练（追求精度）
+
+```bash
+python train_yolo_opt.py
+```
+
+| 参数 | 值 | 说明 |
+|------|------|------|
+| 模型 | yolov8s-cls.pt | YOLOv8-small 分类模型（约 5M 参数） |
+| epochs | 100 | 最大训练轮数 |
+| imgsz | 384 | 输入图片尺寸（更大，识别更多细节） |
+| batch | 16 | 批次大小（imgsz 增大，batch 减小） |
+| patience | 25 | 早停轮数 |
+| optimizer | AdamW | AdamW 优化器 |
+| warmup_epochs | 5 | 学习率预热轮数 |
+| 数据增强 | randaugment | 更强的自动增强策略 |
 
 ### 3. 命令行推理
 
