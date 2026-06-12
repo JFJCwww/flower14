@@ -2,8 +2,27 @@
 import sys
 import os
 import warnings
+from datetime import datetime
 from PyQt5 import QtCore, QtGui, QtWidgets
 from ultralytics import YOLO
+
+try:
+    from openpyxl import Workbook, load_workbook
+except ImportError:
+    print("请安装 openpyxl: pip install openpyxl")
+    sys.exit(1)
+
+try:
+    import matplotlib
+    matplotlib.use("Qt5Agg")
+    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+    import matplotlib.pyplot as plt
+    plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
+    plt.rcParams["axes.unicode_minus"] = False
+except ImportError:
+    print("请安装 matplotlib: pip install matplotlib")
+    sys.exit(1)
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -25,7 +44,7 @@ FLOWER_CN = {
     "water_lily": "睡莲",
 }
 
-MODEL_PATH = "runs/best.pt"
+MODEL_PATH = "runs/yolo_cls_best.pt"
 
 # 全局样式表
 STYLE_SHEET = """
@@ -237,6 +256,7 @@ class ImagePlayer(QtWidgets.QWidget):
         self.current_index = 0
         self.classified_count = 0
         self.flower_stats = {name: {"count": 0, "total_conf": 0.0} for name in FLOWER_CN}
+        self.recognition_records = []
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(2000)
 
@@ -256,6 +276,8 @@ class ImagePlayer(QtWidgets.QWidget):
         self.btn_prev.clicked.connect(self.prev_image)
         self.btn_next.clicked.connect(self.next_image)
         self.timer.timeout.connect(self.auto_next)
+        self.btn_save.clicked.connect(self.save_to_excel)
+        self.btn_import.clicked.connect(self.import_and_visualize)
 
         self.label_result_flower.setText("等待识别")
         self.label_result_conf.setText("--")
@@ -435,6 +457,17 @@ class ImagePlayer(QtWidgets.QWidget):
         self.btn_next.setEnabled(False)
         ctrl_layout.addWidget(self.btn_next)
 
+        self.btn_save = QtWidgets.QPushButton("保存结果")
+        self.btn_save.setObjectName("btn_start")
+        self.btn_save.setMinimumHeight(50)
+        self.btn_save.setEnabled(False)
+        ctrl_layout.addWidget(self.btn_save)
+
+        self.btn_import = QtWidgets.QPushButton("导入可视化")
+        self.btn_import.setObjectName("btn_start")
+        self.btn_import.setMinimumHeight(50)
+        ctrl_layout.addWidget(self.btn_import)
+
         main_layout.addLayout(ctrl_layout)
 
         # === 底部提示 ===
@@ -543,11 +576,21 @@ class ImagePlayer(QtWidgets.QWidget):
         self.label_result_flower.setText(cn_name)
         if confidence:
             self.label_result_conf.setText(confidence)
+            conf_val = float(confidence.strip("%")) / 100
             if en_name and en_name in self.flower_stats:
                 self.flower_stats[en_name]["count"] += 1
-                self.flower_stats[en_name]["total_conf"] += float(confidence.strip("%")) / 100
+                self.flower_stats[en_name]["total_conf"] += conf_val
                 self._update_stat_row(en_name)
             self.classified_count += 1
+            self.recognition_records.append({
+                "文件名": os.path.basename(image_path),
+                "文件路径": image_path,
+                "英文名": en_name or "",
+                "中文名": cn_name,
+                "置信度": conf_val,
+                "识别时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            self.btn_save.setEnabled(True)
         else:
             self.label_result_conf.setText("--")
 
@@ -557,6 +600,262 @@ class ImagePlayer(QtWidgets.QWidget):
         lbl_count.setText(str(stats["count"]))
         avg = stats["total_conf"] / stats["count"]
         lbl_conf.setText(f"{avg:.1%}")
+
+    def save_to_excel(self):
+        if not self.recognition_records:
+            QtWidgets.QMessageBox.warning(self, "警告", "没有可保存的识别记录！")
+            return
+
+        save_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "保存识别结果", "识别结果.xlsx", "Excel 文件 (*.xlsx)"
+        )
+        if not save_path:
+            return
+
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "识别记录"
+            headers = ["文件名", "文件路径", "英文名", "中文名", "置信度", "识别时间"]
+            ws.append(headers)
+            for cell in ws[1]:
+                cell.font = cell.font.copy(bold=True)
+
+            for record in self.recognition_records:
+                ws.append([
+                    record["文件名"],
+                    record["文件路径"],
+                    record["英文名"],
+                    record["中文名"],
+                    record["置信度"],
+                    record["识别时间"],
+                ])
+
+            # 汇总统计表
+            ws2 = wb.create_sheet("统计汇总")
+            ws2.append(["花朵名称", "英文名", "识别次数", "平均置信度"])
+            for cell in ws2[1]:
+                cell.font = cell.font.copy(bold=True)
+
+            for en_name, cn_name in FLOWER_CN.items():
+                stats = self.flower_stats[en_name]
+                if stats["count"] > 0:
+                    avg_conf = stats["total_conf"] / stats["count"]
+                else:
+                    avg_conf = 0
+                ws2.append([cn_name, en_name, stats["count"], f"{avg_conf:.1%}"])
+
+            wb.save(save_path)
+            QtWidgets.QMessageBox.information(
+                self, "保存成功", f"识别结果已保存到：\n{save_path}"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "保存失败", f"保存时发生错误：\n{e}")
+
+    def import_and_visualize(self):
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "选择 Excel 文件", "./", "Excel 文件 (*.xlsx)"
+        )
+        if not file_path:
+            return
+
+        try:
+            wb = load_workbook(file_path)
+            if "识别记录" not in wb.sheetnames:
+                QtWidgets.QMessageBox.warning(self, "警告", "该 Excel 文件中没有找到「识别记录」工作表！")
+                return
+
+            ws = wb["识别记录"]
+            records = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0] is None:
+                    continue
+                records.append({
+                    "文件名": row[0],
+                    "英文名": row[2] if len(row) > 2 else "",
+                    "中文名": row[3] if len(row) > 3 else "",
+                    "置信度": row[4] if len(row) > 4 else 0,
+                })
+
+            if not records:
+                QtWidgets.QMessageBox.warning(self, "警告", "识别记录为空！")
+                return
+
+            self.viz_window = VisualizationWindow(records)
+            self.viz_window.show()
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "导入失败", f"读取 Excel 时发生错误：\n{e}")
+
+
+class VisualizationWindow(QtWidgets.QWidget):
+    def __init__(self, records):
+        super().__init__()
+        self.records = records
+        self.setWindowTitle("识别数据可视化")
+        self.setMinimumSize(1000, 700)
+        self.setStyleSheet(STYLE_SHEET)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(10)
+
+        title = QtWidgets.QLabel("花朵识别数据可视化")
+        title.setObjectName("label_title")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # 图表选择
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.btn_bar = QtWidgets.QPushButton("数量柱状图")
+        self.btn_bar.setObjectName("btn_start")
+        self.btn_bar.clicked.connect(self.plot_bar)
+        btn_layout.addWidget(self.btn_bar)
+
+        self.btn_pie = QtWidgets.QPushButton("占比饼图")
+        self.btn_pie.setObjectName("btn_start")
+        self.btn_pie.clicked.connect(self.plot_pie)
+        btn_layout.addWidget(self.btn_pie)
+
+        self.btn_conf = QtWidgets.QPushButton("置信度分布")
+        self.btn_conf.setObjectName("btn_start")
+        self.btn_conf.clicked.connect(self.plot_confidence)
+        btn_layout.addWidget(self.btn_conf)
+
+        self.btn_line = QtWidgets.QPushButton("置信度折线")
+        self.btn_line.setObjectName("btn_start")
+        self.btn_line.clicked.connect(self.plot_line)
+        btn_layout.addWidget(self.btn_line)
+
+        layout.addLayout(btn_layout)
+
+        # matplotlib 画布
+        self.figure = Figure(figsize=(10, 5), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas, stretch=1)
+
+        # 数据表格
+        self.table = QtWidgets.QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["文件名", "中文名", "英文名", "置信度"])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.setMaximumHeight(180)
+        layout.addWidget(self.table)
+
+        self._populate_table()
+        self.plot_bar()
+
+    def _populate_table(self):
+        self.table.setRowCount(len(self.records))
+        for i, rec in enumerate(self.records):
+            self.table.setItem(i, 0, QtWidgets.QTableWidgetItem(str(rec["文件名"])))
+            self.table.setItem(i, 1, QtWidgets.QTableWidgetItem(str(rec["中文名"])))
+            self.table.setItem(i, 2, QtWidgets.QTableWidgetItem(str(rec["英文名"])))
+            conf = rec["置信度"]
+            if isinstance(conf, (int, float)):
+                conf_text = f"{conf:.1%}"
+            else:
+                conf_text = str(conf)
+            self.table.setItem(i, 3, QtWidgets.QTableWidgetItem(conf_text))
+
+    def _aggregate(self):
+        agg = {}
+        for rec in self.records:
+            name = rec["中文名"]
+            if name not in agg:
+                agg[name] = {"count": 0, "total_conf": 0.0}
+            agg[name]["count"] += 1
+            conf = rec["置信度"]
+            if isinstance(conf, (int, float)):
+                agg[name]["total_conf"] += conf
+        return agg
+
+    def plot_bar(self):
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        agg = self._aggregate()
+        names = list(agg.keys())
+        counts = [agg[n]["count"] for n in names]
+        colors = plt.cm.Set3([i / max(len(names), 1) for i in range(len(names))])
+
+        bars = ax.bar(names, counts, color=colors, edgecolor="#333", linewidth=0.5)
+        for bar, count in zip(bars, counts):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
+                    str(count), ha="center", va="bottom", fontsize=10, fontweight="bold")
+
+        ax.set_title("各花朵识别数量", fontsize=14, fontweight="bold")
+        ax.set_ylabel("识别次数")
+        ax.set_xlabel("花朵名称")
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+    def plot_pie(self):
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        agg = self._aggregate()
+        names = list(agg.keys())
+        counts = [agg[n]["count"] for n in names]
+        colors = plt.cm.Set3([i / max(len(names), 1) for i in range(len(names))])
+
+        wedges, texts, autotexts = ax.pie(
+            counts, labels=names, autopct="%1.1f%%",
+            colors=colors, startangle=90, pctdistance=0.85
+        )
+        for t in autotexts:
+            t.set_fontsize(9)
+        ax.set_title("花朵识别占比", fontsize=14, fontweight="bold")
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+    def plot_confidence(self):
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        agg = self._aggregate()
+        names = list(agg.keys())
+        avg_confs = []
+        for n in names:
+            if agg[n]["count"] > 0:
+                avg_confs.append(agg[n]["total_conf"] / agg[n]["count"])
+            else:
+                avg_confs.append(0)
+        colors = plt.cm.RdYlGn([max(0.3, c) for c in avg_confs])
+
+        bars = ax.barh(names, avg_confs, color=colors, edgecolor="#333", linewidth=0.5)
+        for bar, conf in zip(bars, avg_confs):
+            ax.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height() / 2,
+                    f"{conf:.1%}", ha="left", va="center", fontsize=10)
+
+        ax.set_xlim(0, 1.15)
+        ax.set_title("各花朵平均置信度", fontsize=14, fontweight="bold")
+        ax.set_xlabel("平均置信度")
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+    def plot_line(self):
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        confs = []
+        for rec in self.records:
+            c = rec["置信度"]
+            if isinstance(c, (int, float)):
+                confs.append(c)
+            else:
+                confs.append(0)
+
+        ax.plot(range(1, len(confs) + 1), confs, marker="o", markersize=3,
+                color="#667eea", linewidth=1.2, alpha=0.8)
+        ax.fill_between(range(1, len(confs) + 1), confs, alpha=0.15, color="#667eea")
+        ax.set_ylim(0, 1.05)
+        ax.set_title("逐张识别置信度变化", fontsize=14, fontweight="bold")
+        ax.set_xlabel("图片序号")
+        ax.set_ylabel("置信度")
+        ax.grid(True, alpha=0.3)
+        self.figure.tight_layout()
+        self.canvas.draw()
 
 
 if __name__ == "__main__":

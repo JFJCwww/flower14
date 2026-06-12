@@ -58,13 +58,15 @@ shixun/
 Python >= 3.8
 PyTorch >= 2.0
 ultralytics >= 8.4
-PyQt5  （仅 work.py 需要）
+PyQt5        （仅 work.py 需要）
+openpyxl     （仅 work.py 需要，Excel 导出）
+matplotlib   （仅 work.py 需要，数据可视化）
 ```
 
 安装依赖：
 
 ```bash
-pip install ultralytics PyQt5
+pip install ultralytics PyQt5 openpyxl matplotlib
 ```
 
 ## 使用方法
@@ -170,6 +172,14 @@ python work.py
 - 自动轮播图片，每张图实时显示识别结果（中文花名 + 置信度）
 - 支持上一张 / 下一张手动翻页
 - 支持暂停 / 继续播放
+- 右侧面板实时显示各类花朵识别统计（数量 / 平均置信度）
+- **保存结果**：将识别记录导出为 Excel 文件，包含「识别记录」和「统计汇总」两个工作表
+- **导入可视化**：导入已保存的 Excel 文件，以图表形式展示数据，支持 4 种图表：
+  - 数量柱状图：各花朵识别次数
+  - 占比饼图：各花朵识别比例
+  - 置信度分布：各花朵平均置信度横向对比
+  - 置信度折线：逐张图片置信度变化趋势
+  - 底部附带数据明细表格
 
 ## 技术细节
 
